@@ -12,6 +12,7 @@ from .cosem import Cosem
 from .hdlc_dlms_parser import HdlcDlmsParser
 from .meter_data import MeterDataPoint
 from .serial_reader import SerialConfig, SerialReader
+from .tcp_reader import TCPConfig, TCPReader
 
 
 class MeterError(Exception):
@@ -34,24 +35,22 @@ class Meter(ABC):
             observer.notify(data_points)
 
 
-class SerialHdlcDlmsMeter(Meter):
+class HdlcDlmsMeter(Meter):
     HDLC_FLAG = b"\x7e"
 
-    def __init__(self, serial_config: SerialConfig,
-                 cosem: Cosem,
+    def __init__(self, cosem: Cosem,
                  decryption_key: Optional[str] = None,
                  use_system_time: bool = False) -> None:
         super().__init__()
         self._parser = HdlcDlmsParser(cosem, decryption_key, use_system_time)
-        self._serial = SerialReader(serial_config, self._data_received)
 
     async def start(self) -> None:
-        await self._serial.start_and_listen()
+        await self._reader.start_and_listen()
 
     def _data_received(self, received_data: bytes) -> None:
         if not received_data:
             return
-        if received_data == SerialHdlcDlmsMeter.HDLC_FLAG:
+        if received_data == self.HDLC_FLAG:
             self._parser.append_to_hdlc_buffer(received_data)
             return
 
@@ -63,3 +62,21 @@ class SerialHdlcDlmsMeter(Meter):
             message_time = self._parser.extract_message_time()
             data_points = self._parser.convert_dlms_bundle_to_reader_data(dlms_objects, message_time)
             self._notify_observers(data_points)
+
+
+class SerialHdlcDlmsMeter(HdlcDlmsMeter):
+    def __init__(self, serial_config: SerialConfig,
+                 cosem: Cosem,
+                 decryption_key: Optional[str] = None,
+                 use_system_time: bool = False) -> None:
+        super().__init__(cosem, decryption_key, use_system_time)
+        self._reader = SerialReader(serial_config, self._data_received)
+
+
+class TCPHdlcDlmsMeter(HdlcDlmsMeter):
+    def __init__(self, tcp_config: TCPConfig,
+                 cosem: Cosem,
+                 decryption_key: Optional[str] = None,
+                 use_system_time: bool = False) -> None:
+        super().__init__(cosem, decryption_key, use_system_time)
+        self._reader = TCPReader(tcp_config, self._data_received)
